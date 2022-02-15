@@ -96,8 +96,7 @@ bool spi_bus_init (spi_host_device_t host,
 
 bool spi_device_init (uint8_t bus, uint8_t cs);
 
-size_t spi_transfer_pf(uint8_t bus, uint8_t cs, 
-                       const uint8_t *mosi, uint8_t *miso, uint16_t len);
+size_t spi_transfer_pf(const uint8_t *mosi, uint8_t *miso, uint16_t len);
 
 /*
  * freertos api wrapper
