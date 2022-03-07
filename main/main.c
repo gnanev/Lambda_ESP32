@@ -1,5 +1,6 @@
 #include <stdio.h>
-#include "esp8266_wrapper.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "cj125.h"
 
 #define STACK_SIZE 8096
