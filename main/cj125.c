@@ -1,12 +1,18 @@
 #include <sys/time.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include "driver/spi_master.h"
 #include "driver/spi_common.h"
+#include "driver/adc.h"
+#include "driver/ledc.h"
 
 #include "cj125.h"
 #include "cj125_config.h"
+
+#include "adc.h"
 
 //Define CJ125 registers used.
 #define           CJ125_IDENT_REG_REQUEST             0x4800        /* Identify request, gives revision of the chip. */
@@ -28,19 +34,30 @@ bool spi_transaction_not_initialized = true;
 uint8_t txBuff[CJ125_BUFF_LEN];
 uint8_t rxBuff[CJ125_BUFF_LEN];
 
+void PWM_SetDuty(uint8_t duty)
+{
+    ESP_ERROR_CHECK(ledc_set_duty(PWM_MODE, PWM_CHANNEL, duty));
+    ESP_ERROR_CHECK(ledc_update_duty(PWM_MODE, PWM_CHANNEL));
+}
+
 void cj125_Task(void *pvParameters)
 {
     printf("Starting cj125_Task\n");
 
     TickType_t last_wakeup = xTaskGetTickCount();
 
-    while (1)
-    {
-        vTaskDelayUntil(&last_wakeup, 10 / portTICK_PERIOD_MS);
+    uint32_t adc0, adc1;
+
+    while (1) {
+        if (ADC_AquireReading(0, &adc0) && ADC_AquireReading(1, &adc1)) {
+            printf("%*d  %*d \n", 5, adc0, 5, adc1);
+            PWM_SetDuty(adc1 / 4);
+        }
+        vTaskDelayUntil(&last_wakeup, 100 / portTICK_PERIOD_MS);
     }
 }
 
-int cj125_Init()
+void SPI_Init()
 {
     spi_bus_config_t spi_bus_cfg = {
         .miso_io_num = PIN_NUM_MISO,
@@ -51,10 +68,7 @@ int cj125_Init()
         .max_transfer_sz = 4096
     };
 
-    int result = spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 1);
-
-    if (result != ESP_OK)
-        return result;
+    ESP_ERROR_CHECK( spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 1) );
 
     spi_device_interface_config_t dev_cfg = {
         .clock_speed_hz = 1000000,
@@ -72,14 +86,43 @@ int cj125_Init()
         .cs_ena_pretrans = 0   
     };
 
-    result = spi_bus_add_device(HSPI_HOST, &dev_cfg, &h_cj125);
-
-    if (result != ESP_OK)
-        return result;
-    
+    ESP_ERROR_CHECK( spi_bus_add_device(HSPI_HOST, &dev_cfg, &h_cj125) );
+   
     spi_trans.tx_buffer = txBuff;
     spi_trans.rx_buffer = rxBuff;
     spi_trans.length = CJ125_BUFF_LEN * 8;
+}
+
+void PWM_Init()
+{
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode       = PWM_MODE,
+        .timer_num        = PWM_TIMER,
+        .duty_resolution  = PWM_DUTY_RES,
+        .freq_hz          = 5000,
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+
+    ESP_ERROR_CHECK( ledc_timer_config(&ledc_timer) );
+
+    ledc_channel_config_t ledc_channel = {
+        .speed_mode     = PWM_MODE,
+        .channel        = PWM_CHANNEL,
+        .timer_sel      = PWM_TIMER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .gpio_num       = PWM_OUTPUT_IO,
+        .duty           = 0,
+        .hpoint         = 0
+    };
+
+    ESP_ERROR_CHECK( ledc_channel_config(&ledc_channel) );
+}
+
+int cj125_Init()
+{
+    SPI_Init();
+    ADC_Init();
+    PWM_Init();
 
     xTaskCreate(cj125_Task, "cj125_Task", CJ125_STACK_SIZE, NULL, 2, NULL);
 
